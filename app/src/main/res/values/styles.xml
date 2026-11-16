@@ -1,0 +1,12 @@
+<resources>
+    <style name="Theme.AgroTech.Base" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#356B39</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#164B32</item>
+        <item name="android:navigationBarColor">#164B32</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">#F5F7F1</item>
+    </style>
+    <style name="Theme.AgroTech" parent="Theme.AgroTech.Base" />
+</resources>

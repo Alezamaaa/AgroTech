@@ -1,0 +1,8 @@
+<resources>
+    <item name="animal_arete" type="id" />
+    <item name="animal_sex" type="id" />
+    <item name="animal_category" type="id" />
+    <item name="animal_breed" type="id" />
+    <item name="animal_chip" type="id" />
+    <item name="weight_amount" type="id" />
+</resources>
