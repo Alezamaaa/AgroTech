@@ -21,10 +21,22 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
+import android.app.AlertDialog
+import android.content.Intent
+import io.github.jan.supabase.auth.auth
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import mx.edu.agrotech.config.SupabaseClientProvider
 
 /** Interfaz nativa Android en Kotlin. Los módulos de datos no dependen de esta Activity. */
 class MainActivity : Activity() {
     private val repo get() = (application as DemoApplication).repository
+    private val authScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main
+    )
     private val forest = Color.rgb(22, 75, 50)
     private val paper = Color.rgb(245, 247, 241)
     private val ink = Color.rgb(25, 55, 41)
@@ -77,7 +89,16 @@ class MainActivity : Activity() {
         val brand = row()
         brand.addView(LineIcon(this, "sprout", Color.WHITE), LinearLayout.LayoutParams(dp(22), dp(22)))
         brand.addView(text("AGROTECH", 12, Color.WHITE, true).apply { letterSpacing = .16f; setPadding(dp(10), 0, 0, 0) }, LinearLayout.LayoutParams(0, -2, 1f))
-        brand.addView(text("MAQUETA", 10, leaf, true))
+        brand.addView(
+            text("Cerrar sesión", 10, leaf, true).apply {
+                isClickable = true
+                isFocusable = true
+                setPadding(dp(8), dp(6), 0, dp(6))
+                setOnClickListener {
+                    confirmLogout()
+                }
+            }
+        )
         header.addView(brand)
         header.addView(text("Rancho El Encino", 25, Color.WHITE, true).apply { setPadding(0, dp(12), 0, 0) })
         header.addView(text("Ganadería ovina", 14, leaf))
@@ -92,6 +113,42 @@ class MainActivity : Activity() {
         root.addView(nav)
     }
 
+    private fun confirmLogout() {
+        AlertDialog.Builder(this)
+            .setTitle("Cerrar sesión")
+            .setMessage("¿Estás seguro de que deseas cerrar tu sesión?")
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Cerrar sesión") { _, _ ->
+                logout()
+            }
+            .show()
+    }
+
+    private fun logout() {
+        authScope.launch {
+            try {
+                SupabaseClientProvider.client.auth.signOut()
+
+                val intent = Intent(
+                    this@MainActivity,
+                    LoginActivity::class.java
+                ).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TASK
+                }
+
+                startActivity(intent)
+                finish()
+
+            } catch (e: Exception) {
+                Toast.makeText(
+                    this@MainActivity,
+                    e.localizedMessage ?: "No se pudo cerrar la sesión.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
     private fun render() {
         content.removeAllViews()
         when {
@@ -416,4 +473,9 @@ class MainActivity : Activity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + .5f).toInt()
     private fun number(value: Double) = String.format(Locale.forLanguageTag("es-MX"), "%.1f", value)
     private fun hideKeyboard() { (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(root.windowToken, 0); root.clearFocus() }
+
+    override fun onDestroy() {
+        authScope.cancel()
+        super.onDestroy()
+    }
 }

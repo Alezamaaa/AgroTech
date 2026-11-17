@@ -1,5 +1,15 @@
-plugins { id 'com.android.application' }
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file("local.properties")
 
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream {
+        localProperties.load(it)
+    }
+}
 android {
     namespace 'mx.edu.agrotech'
     compileSdk 36
@@ -9,13 +19,28 @@ android {
         targetSdk 35
         versionCode 1
         versionName '0.1-demo'
+        buildConfigField "String", "SUPABASE_URL",
+                "\"${localProperties.getProperty('SUPABASE_URL', '')}\""
+
+        buildConfigField "String", "SUPABASE_PUBLISHABLE_KEY",
+                "\"${localProperties.getProperty('SUPABASE_PUBLISHABLE_KEY', '')}\""
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    buildFeatures {
+        buildConfig true
+    }
 }
 
 dependencies {
+    implementation 'io.github.jan-tennert.supabase:auth-kt:3.9.0'
+    implementation 'io.ktor:ktor-client-android:3.6.0'
     testImplementation 'junit:junit:4.13.2'
+}
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
 }
