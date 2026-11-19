@@ -1,3 +1,4 @@
+
 package mx.edu.agrotech
 
 import android.app.Activity
@@ -5,6 +6,9 @@ import android.os.Bundle
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.text.InputType
+import android.text.method.HideReturnsTransformationMethod
+import android.text.method.PasswordTransformationMethod
 import android.util.Patterns
 import android.view.Gravity
 import android.widget.*
@@ -25,21 +29,49 @@ class LoginActivity : Activity() {
         SupervisorJob() + Dispatchers.Main
     )
 
+    private val preferences by lazy {
+        getSharedPreferences("agrotech_preferences", MODE_PRIVATE)
+    }
+
     private lateinit var emailField: EditText
     private lateinit var passwordField: EditText
     private lateinit var loginButton: Button
     private lateinit var message: TextView
+    private lateinit var rememberEmail: CheckBox
+    private lateinit var keepSession: CheckBox
+    private lateinit var showPasswordButton: ImageButton
+
+    private var passwordVisible = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Comprobar si existe una sesión activa
-        if (SupabaseClientProvider.client.auth.currentSessionOrNull() != null) {
-            openHome()
-            return
-        }
+        scope.launch {
+            try {
+                val prefs = getSharedPreferences(
+                    "agrotech_preferences",
+                    MODE_PRIVATE
+                )
 
-        buildLogin()
+                // Esperar a que Supabase recupere la sesión guardada.
+                SupabaseClientProvider.client.auth.awaitInitialization()
+
+                val mantenerSesion = prefs.getBoolean("keep_session", false)
+                val sesion = SupabaseClientProvider.client.auth.currentSessionOrNull()
+
+                if (sesion != null && mantenerSesion) {
+                    openHome()
+                } else {
+                    if (sesion != null) {
+                        SupabaseClientProvider.client.auth.signOut()
+                    }
+
+                    buildLogin()
+                }
+            } catch (e: Exception) {
+                buildLogin()
+            }
+        }
     }
 
     private fun buildLogin() {
@@ -58,7 +90,6 @@ class LoginActivity : Activity() {
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
         }
-
         root.addView(brand)
 
         val title = TextView(this).apply {
@@ -69,7 +100,6 @@ class LoginActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(0, dp(35), 0, dp(8))
         }
-
         root.addView(title)
 
         val subtitle = TextView(this).apply {
@@ -78,39 +108,124 @@ class LoginActivity : Activity() {
             setTextColor(muted)
             gravity = Gravity.CENTER
         }
-
         root.addView(subtitle)
 
         emailField = EditText(this).apply {
             hint = "Correo electrónico"
             textSize = 15f
             setSingleLine(true)
-            inputType = android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS or
-                    android.text.InputType.TYPE_CLASS_TEXT
+            inputType = InputType.TYPE_CLASS_TEXT or
+                    InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
             background = rounded(Color.WHITE)
             setPadding(dp(15), dp(14), dp(15), dp(14))
-        }
 
+            if (preferences.getBoolean("remember_email", true)) {
+                setText(preferences.getString("saved_email", ""))
+            }
+        }
         root.addView(emailField, params())
+
+        // Campo de contraseña y botón mostrar/ocultar
+        val passwordContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(Color.WHITE)
+        }
 
         passwordField = EditText(this).apply {
             hint = "Contraseña"
             textSize = 15f
             setSingleLine(true)
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            background = rounded(Color.WHITE)
-            setPadding(dp(15), dp(14), dp(15), dp(14))
+            inputType = InputType.TYPE_CLASS_TEXT or
+                    InputType.TYPE_TEXT_VARIATION_PASSWORD
+            transformationMethod = PasswordTransformationMethod.getInstance()
+            background = null
+            setPadding(dp(15), dp(14), dp(8), dp(14))
         }
 
-        root.addView(passwordField, params())
+        passwordContainer.addView(
+            passwordField,
+            LinearLayout.LayoutParams(0, dp(55), 1f)
+        )
+
+        showPasswordButton = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_view)
+
+            background = null
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setColorFilter(forest)
+
+            contentDescription = "Mostrar contraseña"
+            setPadding(dp(10), 0, dp(15), 0)
+
+            setOnClickListener {
+                passwordVisible = !passwordVisible
+
+                if (passwordVisible) {
+                    passwordField.transformationMethod =
+                        HideReturnsTransformationMethod.getInstance()
+
+                    contentDescription = "Ocultar contraseña"
+                    setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+                } else {
+                    passwordField.transformationMethod =
+                        PasswordTransformationMethod.getInstance()
+
+                    contentDescription = "Mostrar contraseña"
+                    setImageResource(android.R.drawable.ic_menu_view)
+                }
+
+                passwordField.setSelection(passwordField.text.length)
+            }
+        }
+
+        passwordContainer.addView(
+            showPasswordButton,
+            LinearLayout.LayoutParams(dp(48), dp(55))
+        )
+
+        root.addView(
+            passwordContainer,
+            params()
+        )
+
+        // Recordar correo
+        rememberEmail = CheckBox(this).apply {
+            text = "Recordar correo electrónico"
+            textSize = 13f
+            setTextColor(ink)
+            buttonTintList = android.content.res.ColorStateList.valueOf(forest)
+            isChecked = preferences.getBoolean("remember_email", true)
+        }
+
+        root.addView(
+            rememberEmail,
+            LinearLayout.LayoutParams(-1, -2).apply {
+                topMargin = dp(10)
+            }
+        )
+
+        // Mantener sesión
+        keepSession = CheckBox(this).apply {
+            text = "Mantener sesión iniciada"
+            textSize = 13f
+            setTextColor(ink)
+            buttonTintList = android.content.res.ColorStateList.valueOf(forest)
+            isChecked = preferences.getBoolean("keep_session", true)
+        }
+
+        root.addView(
+            keepSession,
+            LinearLayout.LayoutParams(-1, -2).apply {
+                topMargin = dp(4)
+            }
+        )
 
         message = TextView(this).apply {
             textSize = 13f
             setTextColor(Color.rgb(170, 40, 40))
             setPadding(0, dp(12), 0, dp(5))
         }
-
         root.addView(message)
 
         loginButton = Button(this).apply {
@@ -132,7 +247,6 @@ class LoginActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(0, dp(25), 0, 0)
         }
-
         root.addView(footer)
 
         setContentView(root)
@@ -164,14 +278,23 @@ class LoginActivity : Activity() {
                     this.password = password
                 }
 
+                preferences.edit()
+                    .putBoolean("remember_email", rememberEmail.isChecked)
+                    .putBoolean("keep_session", keepSession.isChecked)
+                    .putString(
+                        "saved_email",
+                        if (rememberEmail.isChecked) email else ""
+                    )
+                    .apply()
+
                 openHome()
 
             } catch (e: Exception) {
 
-                message.text = "Correo o contraseña incorrectos. Verifica tus datos e inténtalo nuevamente."
+                message.text =
+                    "Correo o contraseña incorrectos. Verifica tus datos e inténtalo nuevamente."
 
-            }
-            finally {
+            } finally {
 
                 loginButton.isEnabled = true
                 loginButton.text = "Iniciar sesión"
