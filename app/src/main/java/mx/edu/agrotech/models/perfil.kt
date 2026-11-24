@@ -1,3 +1,4 @@
+
 package mx.edu.agrotech.models
 
 import kotlinx.serialization.SerialName
@@ -5,10 +6,15 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class Perfil(
-    val id: String,
+    @SerialName("perfil_id")
+    val perfilId: String,
 
     @SerialName("nombre_completo")
     val nombreCompleto: String,
 
-    val rol: String
+    val correo: String,
+    val rol: String,
+
+    @SerialName("creado_en")
+    val creadoEn: String? = null
 )

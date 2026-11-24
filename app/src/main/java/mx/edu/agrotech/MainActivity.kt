@@ -32,7 +32,10 @@ import kotlinx.coroutines.launch
 import mx.edu.agrotech.config.SupabaseClientProvider
 import android.util.Log
 import mx.edu.agrotech.data.SupabaseRepository
-
+import mx.edu.agrotech.models.AnimalSupabase
+import mx.edu.agrotech.models.Raza
+import mx.edu.agrotech.models.PesajeSupabase
+import mx.edu.agrotech.models.Rancho
 
 /** Interfaz nativa Android en Kotlin. Los módulos de datos no dependen de esta Activity. */
 class MainActivity : Activity() {
@@ -56,8 +59,17 @@ class MainActivity : Activity() {
     private var ranchoRegistrado = false
     private var cargandoDatos = true
     private var nombreRancho = ""
+    private var ranchoIdActual = ""
+
+    private var rolActual = ""
+    private val animalRepository = AnimalRepository()
+    private var animalesSupabase: List<AnimalSupabase> = emptyList()
+    private var ranchosAsociacion: List<Rancho> = emptyList()
+    private var razasSupabase: List<Raza> = emptyList()
     private var birth: LocalDate? = null
     private var weightDate = LocalDate.now()
+    private var pesajesSupabase: List<PesajeSupabase> = emptyList()
+    private var pesajesCargadosPara: String? = null
     private val displayDate =
         DateTimeFormatter.ofPattern("d MMM yyyy", Locale.forLanguageTag("es-MX"))
     private var draft = Bundle()
@@ -211,9 +223,44 @@ class MainActivity : Activity() {
             return
         }
 
-        if (!ranchoRegistrado) {
+        if (rolActual == "ganadero" && !ranchoRegistrado) {
             registrarRanchoScreen()
             nav.visibility = View.GONE
+            return
+        }
+
+        if (rolActual == "asociacion") {
+            nav.visibility = View.GONE
+
+            if (route.startsWith("association_ranch:")) {
+                val ranchoId = route.substringAfter(":")
+
+                val rancho = ranchosAsociacion.find {
+                    it.ranchoId == ranchoId
+                }
+
+                if (rancho != null) {
+                    detalleRanchoAsociacion(rancho)
+                } else {
+                    title("Rancho no encontrado", "No se pudo recuperar la información del rancho.")
+                    secondary("Volver al panel") {
+                        route = "home"
+                        render()
+                    }
+                }
+            } else {
+                panelAsociacion()
+            }
+
+            return
+        }
+
+        if (rolActual != "ganadero") {
+            nav.visibility = View.GONE
+            title("Acceso no disponible", "Tu cuenta no tiene un rol reconocido para esta pantalla.")
+            action("Cerrar sesión", "Salir de AgroTech", "logout") {
+                confirmLogout()
+            }
             return
         }
 
@@ -227,6 +274,7 @@ class MainActivity : Activity() {
             route == "inventory" -> inventory()
             route == "metrics" -> metrics()
             route.startsWith("detail:") -> detail(route.substringAfter(':'))
+            route.startsWith("animal:") -> detailSupabase(route.substringAfter(':'))
             route.startsWith("weights:") -> weights(route.substringAfter(':'))
             else -> {
                 route = "home"
@@ -258,20 +306,129 @@ class MainActivity : Activity() {
         note("Primera etapa: ficha individual e historial de pesos. Los cambios se conservan durante esta sesión de la app.")
     }
 
-    private fun inventory() {
-        title("Inventario", "${repo.all().size} animales de demostración")
-        Category.entries.forEach { category ->
-            section("${category.label} · ${repo.count(category)}")
-            val animals = repo.all().filter { it.category == category }
-            if (animals.isEmpty()) note("Todavía no hay animales en esta categoría.")
-            animals.forEach { animal -> animalCard(animal) { navigate("detail:${animal.id}") } }
+    private fun panelAsociacion() {
+        title(
+            "Panel de asociación",
+            "Supervisión general de los ranchos registrados en AgroTech."
+        )
+
+        section("Resumen")
+
+        value(
+            "Ranchos registrados",
+            ranchosAsociacion.size.toString()
+        )
+
+        section("Ranchos registrados")
+
+        if (ranchosAsociacion.isEmpty()) {
+            note("Todavía no hay ranchos registrados.")
+        } else {
+            ranchosAsociacion.forEach { rancho ->
+
+                val ubicacion = listOfNotNull(
+                    rancho.localidad,
+                    rancho.municipio,
+                    rancho.estado
+                ).filter { it.isNotBlank() }
+                    .joinToString(", ")
+
+                action(
+                    rancho.nombre,
+                    if (ubicacion.isBlank()) {
+                        "Información de ubicación no disponible"
+                    } else {
+                        ubicacion
+                    },
+                    "home"
+                ) {
+                    route = "association_ranch:${rancho.ranchoId}"
+                    render()
+                }
+            }
         }
-        primary("Agregar animal") { navigate("add") }
+
+        section("Sesión")
+
+        action(
+            "Cerrar sesión",
+            "Salir de tu cuenta de AgroTech",
+            "logout"
+        ) {
+            confirmLogout()
+        }
     }
+
+    private fun rowInfo(etiqueta: String, valor: String) {
+        val fila = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(10), 0, dp(10))
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        fila.addView(
+            text(etiqueta, 14, muted),
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+
+        fila.addView(text(valor, 14, forest, true))
+        content.addView(fila)
+    }
+    private fun detalleRanchoAsociacion(rancho: Rancho) {
+        title(rancho.nombre, "Información general del rancho")
+
+        section("Datos del rancho")
+
+        rowInfo("Localidad", rancho.localidad ?: "No registrada")
+        rowInfo("Municipio", rancho.municipio ?: "No registrado")
+        rowInfo("Estado", rancho.estado ?: "No registrado")
+        rowInfo("País", rancho.pais)
+        rowInfo("Moneda", rancho.monedaPreferida)
+        rowInfo("Unidad de peso", rancho.unidadPeso)
+
+        section("Estado")
+        note(if (rancho.activo) "Rancho activo" else "Rancho inactivo")
+
+        secondary("Volver al panel") {
+            route = "home"
+            render()
+        }
+    }
+    private fun inventory() {
+        title("Inventario", "${animalesSupabase.size} animales registrados")
+
+        if (animalesSupabase.isEmpty()) {
+            note("Todavía no hay animales registrados en tu rancho.")
+        } else {
+            section("Rebaño registrado")
+
+            animalesSupabase.forEach { animal ->
+                val raza = razasSupabase
+                    .find { it.razaId == animal.razaId }
+                    ?.nombre ?: "Raza no especificada"
+
+                val sexo = when (animal.sexo) {
+                    "H" -> "Hembra"
+                    "M" -> "Macho"
+                    else -> "No especificado"
+                }
+
+                link(
+                    "Arete ${animal.arete}\n$raza · $sexo · ${animal.estado}"
+                ) {
+                    navigate("animal:${animal.animalId}")
+                }
+            }
+        }
+
+        primary("Agregar animal") {
+            navigate("add")
+        }
+    }
+
 
     private fun detail(id: String) {
         val animal = repo.find(id) ?: return missingAnimal()
-        bottomBackButton()
         title("Arete ${animal.id}", "${animal.breed} · ${animal.sex.label}")
         badge(animal.stage)
         value("Nacimiento", displayDate.format(animal.birth))
@@ -300,30 +457,109 @@ class MainActivity : Activity() {
         if (!familyFound) note("Sin parentescos registrados.")
         primary("Ver y registrar pesos") { navigate("weights:$id") }
         note("Sanidad, alimentación y reproducción se incorporarán en etapas posteriores.")
+        bottomBackButton()
     }
 
-    private fun addAnimal() {
-        title("Agregar animal", "Captura básica · Guardado de demostración")
-        val arete =
-            field("Arete interno *", "Ej. 102", R.id.animal_arete, draft.getString("id", ""), 30)
-        label("Sexo")
-        val sex = picker(Sex.entries.map { it.label }, R.id.animal_sex, draft.getInt("sex"))
-        label("Categoría")
-        val category = picker(
-            Category.entries.map { it.label },
-            R.id.animal_category,
-            draft.getInt("category")
+
+    private fun detailSupabase(animalId: String) {
+        val animal = animalesSupabase.find {
+            it.animalId == animalId
+        } ?: run {
+            title("Animal no disponible", "No se encontró el registro en Supabase.")
+            return
+        }
+
+        val raza = razasSupabase
+            .find { it.razaId == animal.razaId }
+            ?.nombre ?: "No especificada"
+
+        val sexo = when (animal.sexo) {
+            "H" -> "Hembra"
+            "M" -> "Macho"
+            else -> "No especificado"
+        }
+
+        title("Arete ${animal.arete}", "Ficha del animal")
+
+        badge(animal.estado)
+
+        value("Identificador", animal.animalId)
+        value("Arete", animal.arete)
+        value("Sexo", sexo)
+        value("Raza", raza)
+        value("SINIIGA", animal.siniiga ?: "Sin registrar")
+        value(
+            "Registro genealógico",
+            animal.registroGenealogico ?: "Sin registrar"
         )
-        val breed =
-            field("Raza *", "Ej. Dorper", R.id.animal_breed, draft.getString("breed", "Dorper"), 50)
+        value(
+            "Fecha de nacimiento",
+            animal.fechaNacimiento ?: "Sin registrar"
+        )
+        value("Motivo de ingreso", animal.motivoIngreso)
+        value(
+            "Observaciones",
+            animal.observaciones ?: "Sin observaciones"
+        )
+        section("Control de peso")
+        note("PRUEBA: sección de pesajes visible")
+
+        action(
+            "Historial de pesajes",
+            "Consultar y registrar pesos del animal",
+            "chart"
+        ) {
+            weightDate = LocalDate.now()
+            pesajesCargadosPara = null
+            navigate("weights:${animal.animalId}", true)
+        }
+        bottomBackButton()
+    }
+
+
+    private fun addAnimal() {
+        title("Agregar animal", "Registro de animales · Guardado en AgroTech")
+
+        val arete = field(
+            "Arete interno *",
+            "Ej. 102",
+            R.id.animal_arete,
+            draft.getString("id", ""),
+            30
+        )
+
+        label("Sexo")
+        val sex = picker(
+            listOf("Hembra", "Macho"),
+            R.id.animal_sex,
+            draft.getInt("sex")
+        )
+
+        label("Raza")
+        val razas = razasSupabase
+        val opcionesRaza = listOf("Seleccionar raza") + razas.map { it.nombre }
+
+        val breed = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                opcionesRaza
+            )
+        }
+        content.addView(breed)
+
         label("Fecha de nacimiento *")
-        val dateButton = secondary(birth?.format(displayDate) ?: "Seleccionar fecha") {}
+        val dateButton = secondary(
+            birth?.format(displayDate) ?: "Seleccionar fecha"
+        ) {}
+
         dateButton.setOnClickListener {
             chooseDate(birth ?: LocalDate.now(), null) { selected ->
                 birth = selected
                 dateButton.text = displayDate.format(selected)
             }
         }
+
         val chip = field(
             "SINIIGA / microchip (opcional)",
             "Si ya cuenta con él",
@@ -331,53 +567,156 @@ class MainActivity : Activity() {
             draft.getString("chip", ""),
             30
         )
+
+        val observaciones = field(
+            "Observaciones (opcional)",
+            "Información adicional",
+            View.generateViewId(),
+            "",
+            300
+        )
+
         val error = errorText()
-        primary("Agregar a la demostración") {
-            val date = birth
-            if (date == null) {
-                showError(error, "Selecciona la fecha de nacimiento."); return@primary
+
+        primary("Guardar animal") {
+            val fecha = birth
+            val razaSeleccionada = breed.selectedItemPosition
+
+            when {
+                arete.text.toString().isBlank() -> {
+                    showError(error, "Escribe el arete del animal.")
+                    return@primary
+                }
+
+                razas.isEmpty() -> {
+                    showError(error, "No se pudieron cargar las razas.")
+                    return@primary
+                }
+
+                razaSeleccionada == 0 -> {
+                    showError(error, "Selecciona una raza.")
+                    return@primary
+                }
+
+                fecha == null -> {
+                    showError(error, "Selecciona la fecha de nacimiento.")
+                    return@primary
+                }
             }
-            try {
-                val animal = repo.add(
-                    arete.text.toString(),
-                    Sex.entries[sex.selectedItemPosition],
-                    Category.entries[category.selectedItemPosition],
-                    breed.text.toString(),
-                    chip.text.toString(),
-                    date
-                )
-                hideKeyboard()
-                draft = Bundle(); birth = null
-                stack.clear(); stack += "inventory"
-                route = "detail:${animal.id}"
-                render()
-                Toast.makeText(this, "Animal agregado a la demostración", Toast.LENGTH_SHORT).show()
-            } catch (e: IllegalArgumentException) {
-                showError(error, e.message ?: "Revisa los datos.")
+
+            val ranchoId = ranchoIdActual
+            if (ranchoId.isBlank()) {
+                showError(error, "No se encontró el rancho del usuario.")
+                return@primary
+            }
+
+            val sexoSeleccionado =
+                if (sex.selectedItemPosition == 0) "H" else "M"
+
+            supabaseScope.launch {
+                try {
+                    animalRepository.registrarAnimal(
+                        ranchoId = ranchoId,
+                        arete = arete.text.toString(),
+                        sexo = sexoSeleccionado,
+                        siniiga = chip.text.toString(),
+                        razaId = razas[razaSeleccionada - 1].razaId,
+                        fechaNacimiento = fecha.toString(),
+                        observaciones = observaciones.text.toString()
+                    )
+
+                    animalesSupabase =
+                        animalRepository.obtenerAnimales(ranchoIdActual)
+
+                    draft = Bundle()
+                    birth = null
+                    route = "inventory"
+                    stack.clear()
+                    render()
+
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Animal registrado correctamente.",
+                        Toast.LENGTH_LONG
+                    ).show()
+
+                } catch (e: Exception) {
+                    Log.e("AGROTECH_ANIMALES", "Error al registrar animal", e)
+                    showError(
+                        error,
+                        e.localizedMessage ?: "No se pudo registrar el animal."
+                    )
+                }
             }
         }
-        note("Los datos son de prueba. El registro formal de nacimientos y su evidencia tendrán un flujo propio.")
+        bottomBackButton()
     }
 
+
+
     private fun weights(id: String) {
-        val animal = repo.find(id) ?: return missingAnimal()
-        bottomBackButton()
-        title("Pesos · ${animal.id}", "Historial del animal en kilogramos")
-        if (animal.weights.isEmpty()) note("Aún no hay pesajes.")
-        animal.weights.forEach { weight ->
-            value(
-                displayDate.format(weight.date),
-                "${number(weight.kg)} kg"
-            )
+        val animal = animalesSupabase.find { it.animalId == id }
+
+        if (animal == null) {
+            title("Animal no disponible", "No se encontró el animal en Supabase.")
+            return
         }
-        section("Nuevo pesaje")
-        label("Fecha *")
-        val dateButton = secondary(displayDate.format(weightDate)) {}
-        dateButton.setOnClickListener {
-            chooseDate(weightDate.coerceAtLeast(animal.birth), animal.birth) { selected ->
-                weightDate = selected; dateButton.text = displayDate.format(selected)
+
+        title("Pesos · Arete ${animal.arete}", "Historial de pesajes en kilogramos")
+
+        // Consultar historial desde Supabase
+        if (pesajesCargadosPara != id) {
+            note("Consultando historial de pesajes...")
+
+            supabaseScope.launch {
+                try {
+                    pesajesSupabase = animalRepository.obtenerPesajes(id)
+                    pesajesCargadosPara = id
+                    render()
+                } catch (e: Exception) {
+                    Log.e("AGROTECH_PESAJES", "Error al consultar pesajes", e)
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Error al consultar pesajes: ${e.localizedMessage}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            return
+        }
+
+        // Mostrar historial
+        section("Historial")
+
+        if (pesajesSupabase.isEmpty()) {
+            note("Este animal todavía no tiene pesajes registrados.")
+        } else {
+            pesajesSupabase.forEach { pesaje ->
+                value(
+                    pesaje.fecha,
+                    "${pesaje.pesoKg} kg"
+                )
+
+                if (!pesaje.observaciones.isNullOrBlank()) {
+                    note(pesaje.observaciones)
+                }
             }
         }
+
+        // Formulario de nuevo pesaje
+        section("Nuevo pesaje")
+
+        label("Fecha *")
+
+        val dateButton = secondary(displayDate.format(weightDate)) {}
+
+        dateButton.setOnClickListener {
+            chooseDate(weightDate, null) { selected ->
+                weightDate = selected
+                dateButton.text = displayDate.format(selected)
+            }
+        }
+
         val kg = field(
             "Peso (kg) *",
             "Ej. 12.5",
@@ -385,33 +724,106 @@ class MainActivity : Activity() {
             draft.getString("weight:$id", ""),
             10
         ).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            inputType = InputType.TYPE_CLASS_NUMBER or
+                    InputType.TYPE_NUMBER_FLAG_DECIMAL
         }
+
+        val observaciones = field(
+            "Observaciones (opcional)",
+            "Información adicional",
+            View.generateViewId(),
+            "",
+            300
+        )
+
         val error = errorText()
-        primary("Guardar pesaje de ejemplo") {
-            val amount = kg.text.toString().trim().replace(',', '.').toDoubleOrNull()
-            if (amount == null) {
-                showError(error, "Escribe un peso válido en kilogramos."); return@primary
+
+        primary("Guardar pesaje") {
+            val amount = kg.text.toString()
+                .trim()
+                .replace(',', '.')
+                .toDoubleOrNull()
+
+            if (amount == null || amount <= 0) {
+                showError(error, "Escribe un peso válido mayor que cero.")
+                return@primary
             }
-            try {
-                repo.addWeight(id, weightDate, amount)
-                draft.remove("weight:$id")
-                hideKeyboard()
-                render()
-                Toast.makeText(this, "Pesaje agregado a la demostración", Toast.LENGTH_SHORT).show()
-            } catch (e: IllegalArgumentException) {
-                showError(error, e.message ?: "Revisa el pesaje.")
+
+            val ranchoId = animal.ranchoId
+
+            if (ranchoId.isBlank()) {
+                showError(error, "No se encontró el rancho del usuario.")
+                return@primary
+            }
+
+            supabaseScope.launch {
+                try {
+                    animalRepository.registrarPesaje(
+                        animalId = id,
+                        ranchoId = ranchoId,
+                        fecha = weightDate.toString(),
+                        pesoKg = amount,
+                        observaciones = observaciones.text.toString().trim()
+                            .ifBlank { null }
+                    )
+
+                    pesajesSupabase =
+                        animalRepository.obtenerPesajes(id)
+
+                    draft.remove("weight:$id")
+                    hideKeyboard()
+                    render()
+
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Pesaje guardado correctamente",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                } catch (e: Exception) {
+                    Log.e("AGROTECH_PESAJES", "Error al guardar pesaje", e)
+
+                    showError(
+                        error,
+                        "No se pudo guardar el pesaje: ${e.localizedMessage}"
+                    )
+                }
             }
         }
-        note("Un pesaje por fecha en esta maqueta. Los registros se ordenan por fecha; no se reemplaza el historial.")
     }
 
+
+
     private fun metrics() {
-        title("El rebaño en números", "Calculado únicamente con la demostración")
-        val stats = row().apply { setPadding(0, dp(16), 0, dp(8)) }
+        val total = animalesSupabase.size
+
+        val vivos = animalesSupabase.count {
+            it.estado.equals("vivo", ignoreCase = true)
+        }
+
+        val muertos = animalesSupabase.count {
+            it.estado.equals("muerto", ignoreCase = true) ||
+                    it.estado.equals("fallecido", ignoreCase = true)
+        }
+
+        val hembras = animalesSupabase.count {
+            it.sexo.equals("H", ignoreCase = true)
+        }
+
+        val machos = animalesSupabase.count {
+            it.sexo.equals("M", ignoreCase = true)
+        }
+
+        title("El rebaño en números", "Estadísticas de tu rancho")
+
+        // Tarjetas principales
+        val stats = row().apply {
+            setPadding(0, dp(16), 0, dp(8))
+        }
+
         listOf(
-            repo.all().size to "Animales registrados",
-            repo.count(Category.LAMBS) to "Crías registradas"
+            total to "Animales registrados",
+            vivos to "Animales vivos"
         ).forEachIndexed { index, (count, caption) ->
             val box = column().apply {
                 background = rounded(Color.WHITE, 16, line)
@@ -419,15 +831,49 @@ class MainActivity : Activity() {
                 addView(text(count.toString(), 30, forest, true))
                 addView(text(caption, 12, muted))
             }
+
             stats.addView(
                 box,
-                LinearLayout.LayoutParams(0, -1, 1f).apply { if (index == 0) marginEnd = dp(12) })
+                LinearLayout.LayoutParams(0, -1, 1f).apply {
+                    if (index == 0) marginEnd = dp(12)
+                }
+            )
         }
+
         content.addView(stats)
-        section("Inventario por categoría")
-        Category.entries.forEach { value(it.label, repo.count(it).toString()) }
-        note("Preñez, mortalidad y costos se mostrarán cuando existan eventos y periodos suficientes. Los supuestos del Excel no son registros reales del rancho.")
+
+        // Estado del rebaño
+        section("Estado del rebaño")
+        value("Animales vivos", vivos.toString())
+        value("Animales muertos", muertos.toString())
+
+        // Distribución por sexo
+        section("Distribución por sexo")
+        value("Hembras", hembras.toString())
+        value("Machos", machos.toString())
+
+        // Distribución por raza
+        section("Distribución por raza")
+
+        razasSupabase.forEach { raza ->
+            val cantidad = animalesSupabase.count {
+                it.razaId == raza.razaId
+            }
+
+            if (cantidad > 0) {
+                value(raza.nombre, cantidad.toString())
+            }
+        }
+
+        if (animalesSupabase.none { it.razaId != null }) {
+            note("Todavía no hay animales con raza asignada.")
+        }
+        note(
+            "Estas estadísticas se calculan con los animales registrados " +
+                    "en Supabase para el rancho actual."
+        )
     }
+
 
     private fun registrarRanchoScreen() {
         title("Registra tu rancho", "Completa los datos para comenzar a utilizar AgroTech.")
@@ -500,11 +946,13 @@ class MainActivity : Activity() {
                         nombre = nombreTexto,
                         localidad = localidadTexto,
                         municipio = municipioTexto,
-                        estadoRegion = estadoTexto
+                        estado = estadoTexto
                     )
 
-                    nombreRancho = nombreTexto
-                    headerRancho.text = nombreRancho
+                    val datosActualizados = SupabaseRepository().obtenerDatosUsuario()
+                    val ranchoGuardado = datosActualizados?.ranchos?.firstOrNull()
+                        ?: throw Exception("El rancho se registró, pero no se pudo recuperar.")
+                    nombreRancho = ranchoGuardado.nombre
                     ranchoRegistrado = true
                     route = "home"
                     render()
@@ -697,6 +1145,7 @@ class MainActivity : Activity() {
         )
 
         val error = errorText()
+        var ranchoId = ""
 
         lateinit var guardar: Button
         guardar = primary("Guardar cambios") {
@@ -734,10 +1183,11 @@ class MainActivity : Activity() {
             supabaseScope.launch {
                 try {
                     SupabaseRepository().actualizarRancho(
+                        ranchoId = ranchoId,
                         nombre = nombreTexto,
                         localidad = localidadTexto,
                         municipio = municipioTexto,
-                        estadoRegion = estadoTexto
+                        estado = estadoTexto
                     )
 
                     nombreRancho = nombreTexto
@@ -771,13 +1221,15 @@ class MainActivity : Activity() {
         supabaseScope.launch {
             try {
                 val datos = SupabaseRepository().obtenerDatosUsuario()
-                val rancho = datos?.rancho
-                    ?: throw Exception("No se encontró el rancho de esta cuenta.")
+                val rancho = datos?.ranchos?.firstOrNull()
+                    ?: throw Exception("No se encontró un rancho registrado.")
+
+                ranchoId = rancho.ranchoId
 
                 nombre.setText(rancho.nombre)
                 localidad.setText(rancho.localidad.orEmpty())
                 municipio.setText(rancho.municipio.orEmpty())
-                estado.setText(rancho.estado_region.orEmpty())
+                estado.setText(rancho.estado.orEmpty())
 
                 guardar.isEnabled = true
                 guardar.text = "Guardar cambios"
@@ -1011,7 +1463,7 @@ class MainActivity : Activity() {
         button(caption, forest, Color.WHITE, click)
 
     private fun secondary(caption: String, click: () -> Unit) =
-        button(caption, Color.WHITE, ink, click, true)
+        button(caption, Color.rgb(252, 232, 232), Color.rgb(168, 50, 50), click, true)
 
     private fun button(
         caption: String,
@@ -1110,24 +1562,34 @@ class MainActivity : Activity() {
 
                 if (datos == null) {
                     cargandoDatos = false
-                    Log.w("AGROTECH_SUPABASE", "No se encontró el perfil o no hay sesión.")
-                    Toast.makeText(
-                        this@MainActivity,
-                        "No se encontraron los datos del usuario. Verifica tu perfil.",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    ranchoRegistrado = false
+                    nombreRancho = ""
                     render()
                     return@launch
                 }
 
-                ranchoRegistrado = datos.rancho != null
-                nombreRancho = datos.rancho?.nombre ?: ""
-                cargandoDatos = false
-                headerRancho.text = nombreRancho.ifBlank { "AgroTech" }
+                rolActual = datos.perfil.rol.lowercase().trim()
+                if (rolActual == "asociacion") {
+                    ranchosAsociacion = SupabaseRepository().obtenerTodosLosRanchos()
+                }
+                val rancho = datos.ranchos.firstOrNull()
+
+                ranchoRegistrado = rancho != null
+                nombreRancho = rancho?.nombre ?: ""
+                ranchoIdActual = rancho?.ranchoId ?: ""
+
+                if (rancho != null) {
+                    animalesSupabase = animalRepository.obtenerAnimales(rancho.ranchoId)
+                    razasSupabase = animalRepository.obtenerRazas()
+
+                    Log.d("AGROTECH_ANIMALES", "Animales encontrados: ${animalesSupabase.size}")
+                    Log.d("AGROTECH_RAZAS", "Razas encontradas: ${razasSupabase.size}")
+                }
 
                 Log.d("AGROTECH_SUPABASE", "Perfil: ${datos.perfil}")
-                Log.d("AGROTECH_SUPABASE", "Rancho: ${datos.rancho}")
+                Log.d("AGROTECH_SUPABASE", "Ranchos: ${datos.ranchos}")
 
+                cargandoDatos = false
                 render()
 
             } catch (e: Exception) {

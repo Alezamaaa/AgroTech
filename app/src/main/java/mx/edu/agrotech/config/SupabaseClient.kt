@@ -1,3 +1,4 @@
+
 package mx.edu.agrotech.config
 
 import io.github.jan.supabase.createSupabaseClient
@@ -14,7 +15,9 @@ object SupabaseClientProvider {
             supabaseKey = BuildConfig.SUPABASE_PUBLISHABLE_KEY
         ) {
             install(Auth)
-            install(Postgrest)
+            install(Postgrest) {
+                defaultSchema = "agrotech"
+            }
         }
     }
 }
